@@ -2,7 +2,8 @@ name: Scrape Gibson Flats
 
 on:
   schedule:
-    - cron: "0 6,18 * * *"
+    # UTC candidates for 06:00 / 18:00 America/Chicago (CST and CDT).
+    - cron: "0 0,11,12,23 * * *"
   workflow_dispatch:
 
 permissions:
@@ -12,18 +13,33 @@ jobs:
   scrape:
     runs-on: ubuntu-latest
     steps:
+      - name: Keep schedule on Texas local time
+        if: github.event_name == 'schedule'
+        run: |
+          HOUR="$(TZ=America/Chicago date +%H)"
+          echo "America/Chicago hour: ${HOUR}"
+          if [ "${HOUR}" != "06" ] && [ "${HOUR}" != "18" ]; then
+            echo "Skipping: not 06:00 or 18:00 Texas time."
+            exit 0
+          fi
+          echo "should_run=true" >> "$GITHUB_ENV"
+
       - name: Checkout
+        if: github.event_name != 'schedule' || env.should_run == 'true'
         uses: actions/checkout@v4
 
       - name: Set up Python
+        if: github.event_name != 'schedule' || env.should_run == 'true'
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
       - name: Install dependencies
+        if: github.event_name != 'schedule' || env.should_run == 'true'
         run: pip install -r requirements.txt
 
       - name: Check listings
+        if: github.event_name != 'schedule' || env.should_run == 'true'
         env:
           SMTP_HOST: ${{ secrets.SMTP_HOST }}
           SMTP_PORT: ${{ secrets.SMTP_PORT }}
@@ -34,6 +50,7 @@ jobs:
         run: python scrape.py
 
       - name: Commit seen unit IDs
+        if: github.event_name != 'schedule' || env.should_run == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
