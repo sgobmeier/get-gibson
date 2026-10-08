@@ -216,19 +216,27 @@ def required_env(name: str) -> str:
     return value
 
 
+def parse_email_list(value: str) -> list[str]:
+    """Split EMAIL_TO on commas or semicolons into a list of addresses."""
+    addresses = [part.strip() for part in re.split(r"[;,]", value) if part.strip()]
+    if not addresses:
+        raise RuntimeError("EMAIL_TO must include at least one email address")
+    return addresses
+
+
 def send_email(units: list[dict[str, Any]]) -> None:
     host = required_env("SMTP_HOST")
     port = int(os.environ.get("SMTP_PORT", "587"))
     user = required_env("SMTP_USER")
     password = required_env("SMTP_PASSWORD")
-    to_addr = required_env("EMAIL_TO")
+    to_addrs = parse_email_list(required_env("EMAIL_TO"))
     from_addr = os.environ.get("EMAIL_FROM", "").strip() or user
 
     noun = "listing" if len(units) == 1 else "listings"
     message = EmailMessage()
     message["Subject"] = f"Gibson Flats: {len(units)} new {noun}"
     message["From"] = from_addr
-    message["To"] = to_addr
+    message["To"] = ", ".join(to_addrs)
     message.set_content(render_text(units))
 
     html = render_html(units, footer_image_src=f"cid:{FOOTER_IMAGE_CID}")
@@ -247,7 +255,7 @@ def send_email(units: list[dict[str, Any]]) -> None:
         smtp.ehlo()
         smtp.starttls(context=context)
         smtp.login(user, password)
-        smtp.send_message(message)
+        smtp.send_message(message, to_addrs=to_addrs)
 
 
 def write_preview(units: list[dict[str, Any]]) -> Path:
