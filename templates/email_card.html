@@ -1,0 +1,44 @@
+<tr>
+  <td style="padding:20px 0;border-bottom:1px solid #e6e1d8;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+      <tr>
+        <td style="padding:0 0 12px 0;">
+          <a href="{{listing_url}}" style="text-decoration:none;">
+            <img
+              src="{{image_url}}"
+              alt="{{display_unit_number}} {{floor_plan}} floor plan"
+              width="496"
+              style="display:block;width:100%;max-width:496px;height:auto;border:0;border-radius:8px;background:#efe8dc;"
+            />
+          </a>
+        </td>
+      </tr>
+      <tr>
+        <td>
+          <h2 style="margin:0 0 8px;font-size:18px;color:#1f1b16;">
+            <a href="{{listing_url}}" style="color:#1f1b16;text-decoration:none;">
+              {{display_unit_number}}
+              <span style="font-weight:normal;color:#6b6358;"> · {{floor_plan}}</span>
+            </a>
+          </h2>
+          <p style="margin:0 0 10px;color:#4a453e;font-size:14px;">
+            {{beds}} · {{baths}} · {{area}}
+          </p>
+          <p style="margin:0;font-size:16px;color:#1f1b16;">
+            <strong>{{total_monthly}}</strong>
+            <span style="color:#6b6358;"> /mo* · {{base_rent}} base rent</span>
+          </p>
+          <p style="margin:8px 0 0;color:#4a453e;font-size:14px;">
+            {{available}} · {{lease_term}}
+          </p>
+          <p style="margin:14px 0 0;">
+            <a
+              href="{{listing_url}}"
+              style="display:inline-block;padding:10px 16px;background:#8a5a2b;color:#fffaf3;text-decoration:none;border-radius:6px;font-size:14px;"
+            >View listing</a>
+          </p>
+        </td>
+      </tr>
+    </table>
+  </td>
+</tr>

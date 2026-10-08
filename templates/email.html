@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Gibson Flats — {{count}} new {{noun}}</title>
+  <!--
+    Edit this file to tweak the email look.
+    Placeholders filled by scrape.py use double curly braces for count, noun,
+    listings_url, cards, footer_image_src. Card fields live in email_card.html.
+    Do not put those placeholder names inside this comment or they get replaced twice.
+  -->
+  <style>
+    /* Preview-only helpers (many email clients ignore <style>; keep critical styles inline too). */
+    body { margin: 0; padding: 0; background: #f4f1ea; }
+  </style>
+</head>
+<body style="margin:0;padding:0;background:#f4f1ea;font-family:Inter, 'Times New Roman', serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f1ea;padding:24px 12px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="560" cellpadding="0" cellspacing="0" style="max-width:560px;background:#fffaf3;padding:28px 32px;border-radius:12px;">
+          <tr>
+            <td>
+              <p style="margin:0 0 4px;letter-spacing:0.08em;text-transform:uppercase;font-size:12px;color:#8a8175;">Gibson Flats</p>
+              <h1 style="margin:0 0 8px;font-size:24px;color:#1f1b16;">{{count}} new {{noun}}</h1>
+              <p style="margin:0 0 20px;color:#4a453e;font-size:15px;">
+                Newly seen apartments at
+                <a href="{{listings_url}}" style="color:#8a5a2b;">{{listings_url}}</a>
+              </p>
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                {{cards}}
+              </table>
+              <p style="margin:20px 0 0;font-size:13px;color:#8a8175;">
+                Total monthly price includes mandatory monthly fees. Availability and rent change often.
+              </p>
+              <p style="margin:24px 0 0;text-align:center;">
+                <img
+                  src="{{footer_image_src}}"
+                  alt=""
+                  width="200"
+                  style="display:inline-block;width:200px;max-width:60%;height:auto;border:0;"
+                />
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

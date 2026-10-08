@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import smtplib
 import ssl
 import sys
@@ -21,12 +22,18 @@ SIGHTMAP_URL = (
     f"https://sightmap.com/app/api/v1/{SIGHTMAP_ACCOUNT}/sightmaps/{SIGHTMAP_ID}"
 )
 LISTINGS_URL = "https://gibsonflats.com/floorplans/"
+SITE_ORIGIN = "https://gibsonflats.com"
 USER_AGENT = (
     "Mozilla/5.0 (compatible; GibsonFlatsListingWatch/1.0; +https://gibsonflats.com/floorplans/)"
 )
 
 ROOT = Path(__file__).resolve().parent
 SEEN_PATH = ROOT / "data" / "seen.json"
+EMAIL_TEMPLATE_PATH = ROOT / "templates" / "email.html"
+CARD_TEMPLATE_PATH = ROOT / "templates" / "email_card.html"
+PREVIEW_PATH = ROOT / "email_preview.html"
+FOOTER_IMAGE_PATH = ROOT / "public" / "4hufP.png"
+FOOTER_IMAGE_CID = "footer-image"
 
 
 def fetch_payload() -> dict[str, Any]:
@@ -37,6 +44,37 @@ def fetch_payload() -> dict[str, Any]:
     )
     response.raise_for_status()
     return response.json()
+
+
+def fetch_site_unit_extras() -> dict[str, dict[str, str]]:
+    """Map apartment numbers to gibsonflats.com permalinks and thumbnails."""
+    response = requests.get(
+        LISTINGS_URL,
+        headers={"User-Agent": USER_AGENT, "Accept": "text/html"},
+        timeout=60,
+    )
+    response.raise_for_status()
+    match = re.search(
+        r'<script type="application/json" id="jd-fp-data-script-app">(.*?)</script>',
+        response.text,
+        re.S,
+    )
+    if not match:
+        return {}
+
+    data = json.loads(match.group(1))
+    extras: dict[str, dict[str, str]] = {}
+    for unit in data.get("units") or []:
+        number = str(unit.get("apartment_number") or "").strip()
+        if not number:
+            continue
+        permalink = unit.get("permalink") or ""
+        thumbnail = (unit.get("thumbnail") or {}).get("src") or ""
+        extras[number] = {
+            "listing_url": f"{SITE_ORIGIN}{permalink}" if permalink.startswith("/") else permalink,
+            "image_url": thumbnail,
+        }
+    return extras
 
 
 def floor_plan_name(plan: dict[str, Any] | None) -> str:
@@ -52,27 +90,44 @@ def floor_plan_name(plan: dict[str, Any] | None) -> str:
     return str(raw) if raw else "Unknown"
 
 
-def normalize_units(payload: dict[str, Any]) -> list[dict[str, Any]]:
+def normalize_units(
+    payload: dict[str, Any],
+    site_extras: dict[str, dict[str, str]] | None = None,
+) -> list[dict[str, Any]]:
     data = payload.get("data") or payload
     plans = {str(plan.get("id")): plan for plan in data.get("floor_plans") or []}
+    site_extras = site_extras or {}
     units: list[dict[str, Any]] = []
     for unit in data.get("units") or []:
         unit_id = str(unit.get("id") or "")
         if not unit_id:
             continue
         plan = plans.get(str(unit.get("floor_plan_id") or ""))
+        number = str(unit.get("unit_number") or "").strip()
+        extras = site_extras.get(number, {})
+        image_url = (
+            extras.get("image_url")
+            or unit.get("view_image_url")
+            or (plan or {}).get("image_url")
+            or ""
+        )
+        listing_url = extras.get("listing_url") or LISTINGS_URL
         units.append(
             {
                 "id": unit_id,
-                "display_unit_number": unit.get("display_unit_number") or f"APT {unit.get('unit_number', unit_id)}",
+                "display_unit_number": unit.get("display_unit_number")
+                or f"APT {unit.get('unit_number', unit_id)}",
                 "floor_plan": floor_plan_name(plan),
                 "beds": (plan or {}).get("bedroom_label") or (plan or {}).get("bedroom_count") or "—",
                 "baths": (plan or {}).get("bathroom_label") or (plan or {}).get("bathroom_count") or "—",
-                "area": unit.get("display_area") or (f"{unit['area']} sq. ft." if unit.get("area") is not None else "—"),
+                "area": unit.get("display_area")
+                or (f"{unit['area']} sq. ft." if unit.get("area") is not None else "—"),
                 "base_rent": unit.get("display_price") or "—",
                 "total_monthly": unit.get("total_display_price") or "—",
                 "available": unit.get("display_available_on") or unit.get("available_on") or "—",
                 "lease_term": unit.get("display_lease_term") or "—",
+                "image_url": image_url,
+                "listing_url": listing_url,
             }
         )
     units.sort(key=lambda item: (item["display_unit_number"], item["id"]))
@@ -92,62 +147,49 @@ def save_seen(unit_ids: set[str]) -> None:
     SEEN_PATH.write_text(json.dumps({"unit_ids": ordered}, indent=2) + "\n", encoding="utf-8")
 
 
-def render_html(units: list[dict[str, Any]]) -> str:
-    cards = []
-    for unit in units:
-        cards.append(
-            f"""
-            <tr>
-              <td style="padding:16px 0;border-bottom:1px solid #e6e1d8;">
-                <h2 style="margin:0 0 8px;font-size:18px;color:#1f1b16;">
-                  {escape(str(unit["display_unit_number"]))}
-                  <span style="font-weight:normal;color:#6b6358;"> · {escape(str(unit["floor_plan"]))}</span>
-                </h2>
-                <p style="margin:0 0 10px;color:#4a453e;font-size:14px;">
-                  {escape(str(unit["beds"]))} · {escape(str(unit["baths"]))} · {escape(str(unit["area"]))}
-                </p>
-                <p style="margin:0;font-size:16px;color:#1f1b16;">
-                  <strong>{escape(str(unit["total_monthly"]))}</strong>
-                  <span style="color:#6b6358;"> /mo* · {escape(str(unit["base_rent"]))} base rent</span>
-                </p>
-                <p style="margin:8px 0 0;color:#4a453e;font-size:14px;">
-                  {escape(str(unit["available"]))} · {escape(str(unit["lease_term"]))}
-                </p>
-              </td>
-            </tr>
-            """
-        )
+def fill_template(template: str, values: dict[str, Any]) -> str:
+    result = template
+    for key, value in values.items():
+        result = result.replace(f"{{{{{key}}}}}", str(value))
+    return result
+
+
+def render_card(unit: dict[str, Any], card_template: str) -> str:
+    return fill_template(
+        card_template,
+        {
+            "display_unit_number": escape(str(unit["display_unit_number"])),
+            "floor_plan": escape(str(unit["floor_plan"])),
+            "beds": escape(str(unit["beds"])),
+            "baths": escape(str(unit["baths"])),
+            "area": escape(str(unit["area"])),
+            "total_monthly": escape(str(unit["total_monthly"])),
+            "base_rent": escape(str(unit["base_rent"])),
+            "available": escape(str(unit["available"])),
+            "lease_term": escape(str(unit["lease_term"])),
+            "image_url": escape(str(unit["image_url"]), quote=True),
+            "listing_url": escape(str(unit["listing_url"]), quote=True),
+        },
+    )
+
+
+def render_html(units: list[dict[str, Any]], *, footer_image_src: str | None = None) -> str:
+    email_template = EMAIL_TEMPLATE_PATH.read_text(encoding="utf-8")
+    card_template = CARD_TEMPLATE_PATH.read_text(encoding="utf-8")
+    cards = "".join(render_card(unit, card_template) for unit in units)
     noun = "listing" if len(units) == 1 else "listings"
-    return f"""<!DOCTYPE html>
-<html>
-<body style="margin:0;padding:0;background:#f4f1ea;font-family:Georgia, 'Times New Roman', serif;">
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f1ea;padding:24px 12px;">
-    <tr>
-      <td align="center">
-        <table role="presentation" width="560" cellpadding="0" cellspacing="0" style="max-width:560px;background:#fffaf3;padding:28px 32px;border-radius:12px;">
-          <tr>
-            <td>
-              <p style="margin:0 0 4px;letter-spacing:0.08em;text-transform:uppercase;font-size:12px;color:#8a8175;">Gibson Flats</p>
-              <h1 style="margin:0 0 8px;font-size:24px;color:#1f1b16;">{len(units)} new {noun}</h1>
-              <p style="margin:0 0 20px;color:#4a453e;font-size:15px;">
-                Newly seen apartments at
-                <a href="{LISTINGS_URL}" style="color:#8a5a2b;">{LISTINGS_URL}</a>
-              </p>
-              <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
-                {''.join(cards)}
-              </table>
-              <p style="margin:20px 0 0;font-size:13px;color:#8a8175;">
-                Total monthly price includes mandatory monthly fees. Availability and rent change often.
-              </p>
-            </td>
-          </tr>
-        </table>
-      </td>
-    </tr>
-  </table>
-</body>
-</html>
-"""
+    if footer_image_src is None:
+        footer_image_src = FOOTER_IMAGE_PATH.relative_to(ROOT).as_posix()
+    return fill_template(
+        email_template,
+        {
+            "count": len(units),
+            "noun": noun,
+            "listings_url": LISTINGS_URL,
+            "cards": cards,
+            "footer_image_src": escape(footer_image_src, quote=True),
+        },
+    )
 
 
 def render_text(units: list[dict[str, Any]]) -> str:
@@ -160,6 +202,7 @@ def render_text(units: list[dict[str, Any]]) -> str:
                 f"  {unit['beds']} / {unit['baths']} / {unit['area']}",
                 f"  {unit['total_monthly']} /mo* ({unit['base_rent']} base rent)",
                 f"  {unit['available']} · {unit['lease_term']}",
+                f"  {unit['listing_url']}",
                 "",
             ]
         )
@@ -187,7 +230,17 @@ def send_email(units: list[dict[str, Any]]) -> None:
     message["From"] = from_addr
     message["To"] = to_addr
     message.set_content(render_text(units))
-    message.add_alternative(render_html(units), subtype="html")
+
+    html = render_html(units, footer_image_src=f"cid:{FOOTER_IMAGE_CID}")
+    message.add_alternative(html, subtype="html")
+    if FOOTER_IMAGE_PATH.exists():
+        message.get_payload()[-1].add_related(
+            FOOTER_IMAGE_PATH.read_bytes(),
+            maintype="image",
+            subtype="png",
+            cid=FOOTER_IMAGE_CID,
+            filename=FOOTER_IMAGE_PATH.name,
+        )
 
     context = ssl.create_default_context()
     with smtplib.SMTP(host, port, timeout=60) as smtp:
@@ -197,9 +250,24 @@ def send_email(units: list[dict[str, Any]]) -> None:
         smtp.send_message(message)
 
 
-def main() -> int:
+def write_preview(units: list[dict[str, Any]]) -> Path:
+    PREVIEW_PATH.write_text(render_html(units), encoding="utf-8")
+    return PREVIEW_PATH
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = argv if argv is not None else sys.argv[1:]
+    preview_only = "--preview" in args
+
     payload = fetch_payload()
-    units = normalize_units(payload)
+    site_extras = fetch_site_unit_extras()
+    units = normalize_units(payload, site_extras)
+
+    if preview_only:
+        path = write_preview(units)
+        print(f"Wrote preview with {len(units)} unit(s) to {path}")
+        return 0
+
     seen = load_seen()
     new_units = [unit for unit in units if unit["id"] not in seen]
 
